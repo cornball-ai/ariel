@@ -4,15 +4,14 @@ Title: R Front-End for the Triton GPU Compiler via MLIR
 Version: 0.0.0.9000
 Authors@R: person("Troy", "Hernandez", email = "troy@cornball.ai",
                   role = c("aut", "cre"))
-Description: Translates torchlang IR graphs to Triton's MLIR dialect and
+Description: Translates 'torchlang' IR graphs to Triton's MLIR dialect and
     compiles them to GPU kernels. Provides R bindings for the MLIR C API
     and Triton's compilation pipeline, enabling direct GPU code generation
     from R without a Python intermediary.
 License: Apache License (>= 2)
 Encoding: UTF-8
 Depends: R (>= 4.1.0)
-Imports:
-    torchlang
 Suggests:
     tinytest,
-    torch
+    torch,
+    torchlang

@@ -111,3 +111,33 @@ Key libraries needed:
 - libTritonIR (Triton MLIR dialects)
 - libTritonTransforms (optimization passes)
 - libMLIR (core MLIR infrastructure)
+
+## Tested Emission Patterns (Phase 5a)
+
+From `torchlang/inst/scripts/whisper_bench.R`:
+
+### Elementwise fusion (`emit_ttir`)
+- `fused_add_div` — mel postprocessing (2 inputs, add+div chain)
+- `fused_add_gelu` — FFN bias+activation (2 inputs, add then GELU decomposition)
+- All compound ops tested: relu, sigmoid, silu, gelu, sign
+
+### Matmul with epilogue (`emit_ttir_matmul`)
+- `matmul_kernel` — plain tiled matmul (works)
+- `ffn_matmul_gelu_kernel` — matmul + GELU epilogue fusion (works)
+- `matmul + mul(scale)` — **does not work**: `emit_ttir_matmul` only supports unary epilogues, not binary ops that need a second operand (like scaling by a constant)
+
+### Known limitation: binary epilogues
+`emit_ttir_matmul(epilogue_ops = "mul")` returns NULL because `mul` is a binary op but the epilogue codegen only passes `current_ssa` (one input). To support `matmul * scale`, would need either:
+1. A special `scale` epilogue that takes a scalar attribute
+2. A general binary epilogue mechanism with a second pointer argument
+
+## Relationship to Whisper
+
+The benchmark script at `torchlang/inst/scripts/whisper_bench.R` demonstrates ariel on 5 real Whisper-tiny computation patterns:
+- FFN block: matmul + GELU + matmul
+- Mel postprocessing: log10 + add + div
+- GELU standalone
+- Attention scores: matmul * scale
+- Residual add
+
+torchlang captures these as expressions, optimizes to IR, and ariel emits TTIR for each fusible group. Currently text-only (Phase 5a) — no GPU compilation yet.
