@@ -34,9 +34,9 @@ expect_false(is.null(result))
 expect_true(is.character(result$mlir_text))
 expect_true(nchar(result$mlir_text) > 100)
 
-# Contains expected MLIR patterns
+# Contains expected MLIR patterns (validated against triton/test/TritonGPU/matmul.mlir)
 expect_true(grepl("tt.func public", result$mlir_text))
-expect_true(grepl("tt.get_program_id", result$mlir_text))
+expect_true(grepl("tt.get_program_id x : i32", result$mlir_text))
 expect_true(grepl("tt.make_range", result$mlir_text))
 expect_true(grepl("tt.load", result$mlir_text))
 expect_true(grepl("tt.store", result$mlir_text))
@@ -44,6 +44,10 @@ expect_true(grepl("tt.return", result$mlir_text))
 expect_true(grepl("tt.splat", result$mlir_text))
 expect_true(grepl("tt.addptr", result$mlir_text))
 expect_true(grepl("module", result$mlir_text))
+
+# Block size is concrete integer, not SSA variable
+expect_true(grepl("tensor<1024x", result$mlir_text))
+expect_true(grepl("arith.constant 1024 : i32", result$mlir_text))
 
 # Contains relu pattern (arith.cmpf + arith.select)
 expect_true(grepl("arith.cmpf", result$mlir_text))
@@ -156,6 +160,15 @@ if (length(gelu_groups) > 0L) {
 expect_true(grepl("!tt.ptr<f32>", result$mlir_text))
 
 # ============================================================
+# emit_ttir: custom block size
+# ============================================================
+
+result_bs <- emit_ttir(ir, groups[1], block_size = 512L)
+expect_equal(result_bs$block_size, 512L)
+expect_true(grepl("tensor<512x", result_bs$mlir_text))
+expect_true(grepl("arith.constant 512 : i32", result_bs$mlir_text))
+
+# ============================================================
 # emit_ttir_matmul: basic matmul
 # ============================================================
 
@@ -165,13 +178,30 @@ expect_false(is.null(mm_result))
 expect_true(is.character(mm_result$mlir_text))
 expect_true(nchar(mm_result$mlir_text) > 100)
 
-# Contains matmul patterns
+# Contains matmul patterns (modeled after triton/test/TritonGPU/matmul.mlir)
 expect_true(grepl("tt.func public @matmul_kernel", mm_result$mlir_text))
 expect_true(grepl("tt.dot", mm_result$mlir_text))
 expect_true(grepl("scf.for", mm_result$mlir_text))
 expect_true(grepl("scf.yield", mm_result$mlir_text))
 expect_true(grepl("tt.get_program_id x", mm_result$mlir_text))
 expect_true(grepl("tt.get_program_id y", mm_result$mlir_text))
+
+# 2D address computation: expand_dims + broadcast (real Triton pattern)
+expect_true(grepl("tt.expand_dims", mm_result$mlir_text))
+expect_true(grepl("tt.broadcast", mm_result$mlir_text))
+
+# K-loop carries 3 iter_args: acc, a_ptrs, b_ptrs
+expect_true(grepl("iter_args", mm_result$mlir_text))
+
+# Pointer advancement inside loop
+expect_true(grepl("a_ptrs_next", mm_result$mlir_text))
+expect_true(grepl("b_ptrs_next", mm_result$mlir_text))
+
+# Boundary mask with arith.andi
+expect_true(grepl("arith.andi", mm_result$mlir_text))
+
+# tt.divisibility annotations on pointer args
+expect_true(grepl("tt.divisibility = 16", mm_result$mlir_text))
 
 # ============================================================
 # emit_ttir_matmul: with relu epilogue
