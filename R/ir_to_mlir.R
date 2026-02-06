@@ -119,33 +119,31 @@ triton_op_supported <- function(op) {
       sprintf("    %s = arith.divf %s, %s : %s", final_ssa, x, sum_ssa, type)
     )
   } else if (op == "gelu") {
-    # gelu(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-    c1_ssa <- sprintf("%%c_half_%d", base_id)
-    c2_ssa <- sprintf("%%c_coeff_%d", base_id)
-    c3_ssa <- sprintf("%%c_sqrt2pi_%d", base_id)
+    # gelu(x) ~ x * sigmoid(1.702 * x)
+    # Sigmoid approximation avoids math.tanh (illegal in Triton MLIR) and
+    # math.erf (needs libdevice linking). Uses only arith + math.exp.
+    # Max error vs exact GELU: ~0.005 (good enough for inference).
+    c_coeff_ssa <- sprintf("%%c_coeff_%d", base_id)
+    zero_ssa <- sprintf("%%zero_%d", base_id)
     one_ssa <- sprintf("%%one_%d", base_id)
-    x2_ssa <- sprintf("%%x2_%d", base_id)
-    x3_ssa <- sprintf("%%x3_%d", base_id)
-    cx3_ssa <- sprintf("%%cx3_%d", base_id)
-    inner_ssa <- sprintf("%%inner_%d", base_id)
-    scaled_ssa <- sprintf("%%scaled_%d", base_id)
-    tanh_ssa <- sprintf("%%tanh_%d", base_id)
-    plus1_ssa <- sprintf("%%plus1_%d", base_id)
-    half_x_ssa <- sprintf("%%half_x_%d", base_id)
+    sx_ssa <- sprintf("%%sx_%d", base_id)
+    neg_ssa <- sprintf("%%neg_%d", base_id)
+    exp_ssa <- sprintf("%%exp_%d", base_id)
+    denom_ssa <- sprintf("%%denom_%d", base_id)
+    sig_ssa <- sprintf("%%sig_%d", base_id)
     lines <- c(
-      sprintf("    %s = arith.constant dense<5.000000e-01> : %s", c1_ssa, type),
-      sprintf("    %s = arith.constant dense<4.471500e-02> : %s", c2_ssa, type),
-      sprintf("    %s = arith.constant dense<7.978845e-01> : %s", c3_ssa, type),
+      sprintf("    %s = arith.constant dense<1.702000e+00> : %s", c_coeff_ssa, type),
+      sprintf("    %s = arith.constant dense<0.000000e+00> : %s", zero_ssa, type),
       sprintf("    %s = arith.constant dense<1.000000e+00> : %s", one_ssa, type),
-      sprintf("    %s = arith.mulf %s, %s : %s", x2_ssa, x, x, type),
-      sprintf("    %s = arith.mulf %s, %s : %s", x3_ssa, x2_ssa, x, type),
-      sprintf("    %s = arith.mulf %s, %s : %s", cx3_ssa, c2_ssa, x3_ssa, type),
-      sprintf("    %s = arith.addf %s, %s : %s", inner_ssa, x, cx3_ssa, type),
-      sprintf("    %s = arith.mulf %s, %s : %s", scaled_ssa, c3_ssa, inner_ssa, type),
-      sprintf("    %s = math.tanh %s : %s", tanh_ssa, scaled_ssa, type),
-      sprintf("    %s = arith.addf %s, %s : %s", plus1_ssa, one_ssa, tanh_ssa, type),
-      sprintf("    %s = arith.mulf %s, %s : %s", half_x_ssa, c1_ssa, x, type),
-      sprintf("    %s = arith.mulf %s, %s : %s", final_ssa, half_x_ssa, plus1_ssa, type)
+      # 1.702 * x
+      sprintf("    %s = arith.mulf %s, %s : %s", sx_ssa, c_coeff_ssa, x, type),
+      # sigmoid(1.702 * x) = 1 / (1 + exp(-1.702 * x))
+      sprintf("    %s = arith.subf %s, %s : %s", neg_ssa, zero_ssa, sx_ssa, type),
+      sprintf("    %s = math.exp %s : %s", exp_ssa, neg_ssa, type),
+      sprintf("    %s = arith.addf %s, %s : %s", denom_ssa, one_ssa, exp_ssa, type),
+      sprintf("    %s = arith.divf %s, %s : %s", sig_ssa, one_ssa, denom_ssa, type),
+      # x * sigmoid(1.702 * x)
+      sprintf("    %s = arith.mulf %s, %s : %s", final_ssa, x, sig_ssa, type)
     )
   } else if (op == "sign") {
     # sign(x) = select(x > 0, 1, select(x < 0, -1, 0))

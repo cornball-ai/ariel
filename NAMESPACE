@@ -2,7 +2,10 @@
 
 export(emit_ttir)
 export(emit_ttir_matmul)
+export(gpu_cache_clear)
+export(gpu_cache_stats)
 export(gpu_launch)
+export(gpu_launch_matmul)
 export(mlir_compile)
 export(triton_op_supported)
 

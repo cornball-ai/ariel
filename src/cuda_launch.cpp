@@ -12,6 +12,7 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 
 // Helper: check CUDA driver API error
 #define CUDA_CHECK(call) do { \
@@ -38,6 +39,34 @@ static void ensure_cuda_initialized() {
 
   CUDA_CHECK(cuCtxCreate(&cuda_context, 0, device));
   cuda_initialized = true;
+}
+
+// ---- PTX Module Cache ----
+// Caches CUmodule + CUfunction per kernel_name to avoid repeated
+// cuModuleLoadData() on every launch (~0.25ms overhead per call).
+
+struct CachedKernel {
+  CUmodule module;
+  CUfunction function;
+};
+
+static std::unordered_map<std::string, CachedKernel> kernel_cache;
+
+static CUfunction get_cached_kernel(const std::string& ptx,
+                                    const std::string& kernel_name) {
+  auto it = kernel_cache.find(kernel_name);
+  if (it != kernel_cache.end()) {
+    return it->second.function;
+  }
+
+  CUmodule module;
+  CUDA_CHECK(cuModuleLoadData(&module, ptx.c_str()));
+
+  CUfunction function;
+  CUDA_CHECK(cuModuleGetFunction(&function, module, kernel_name.c_str()));
+
+  kernel_cache[kernel_name] = {module, function};
+  return function;
 }
 
 // Extract CUDA device pointer from R torch tensor
@@ -91,13 +120,7 @@ SEXP gpu_launch(std::string ptx, std::string kernel_name,
   try {
     ensure_cuda_initialized();
 
-    // Load PTX module
-    CUmodule module;
-    CUDA_CHECK(cuModuleLoadData(&module, ptx.c_str()));
-
-    // Get kernel function
-    CUfunction kernel;
-    CUDA_CHECK(cuModuleGetFunction(&kernel, module, kernel_name.c_str()));
+    CUfunction kernel = get_cached_kernel(ptx, kernel_name);
 
     // Extract device pointers from input tensors
     std::vector<CUdeviceptr> input_ptrs;
@@ -144,12 +167,125 @@ SEXP gpu_launch(std::string ptx, std::string kernel_name,
     // Synchronize to ensure kernel completes
     CUDA_CHECK(cuCtxSynchronize());
 
-    // Unload module
-    CUDA_CHECK(cuModuleUnload(module));
-
     return output;
 
   } catch (std::exception &e) {
     Rcpp::stop(e.what());
   }
+}
+
+
+//' Launch a Matmul GPU Kernel from Compiled PTX
+//'
+//' Matmul kernels have a different parameter layout than elementwise kernels:
+//' 3 pointer args (A, B, C), 9 i32 scalars (M, N, K, strides), and 2 null
+//' metadata pointers added by Triton. This function handles that layout.
+//'
+//' @param ptx Character, PTX assembly from mlir_compile()
+//' @param kernel_name Character, entry point function name
+//' @param A torch_tensor, matrix A (must be on CUDA)
+//' @param B torch_tensor, matrix B (must be on CUDA)
+//' @param C torch_tensor, pre-allocated output matrix (must be on CUDA)
+//' @param M Integer, rows of A / rows of C
+//' @param N Integer, cols of B / cols of C
+//' @param K Integer, cols of A / rows of B
+//' @param stride_am Integer, stride of A along M dimension
+//' @param stride_ak Integer, stride of A along K dimension
+//' @param stride_bk Integer, stride of B along K dimension
+//' @param stride_bn Integer, stride of B along N dimension
+//' @param stride_cm Integer, stride of C along M dimension
+//' @param stride_cn Integer, stride of C along N dimension
+//' @param grid Integer vector of length 3, grid dimensions
+//' @param block Integer vector of length 3, block dimensions
+//' @param shared_mem Integer, dynamic shared memory bytes
+//' @return The output tensor C
+//' @export
+// [[Rcpp::export]]
+SEXP gpu_launch_matmul(std::string ptx, std::string kernel_name,
+                       SEXP A, SEXP B, SEXP C,
+                       int M, int N, int K,
+                       int stride_am, int stride_ak,
+                       int stride_bk, int stride_bn,
+                       int stride_cm, int stride_cn,
+                       Rcpp::IntegerVector grid, Rcpp::IntegerVector block,
+                       int shared_mem = 0) {
+  try {
+    ensure_cuda_initialized();
+
+    CUfunction kernel = get_cached_kernel(ptx, kernel_name);
+
+    // Extract device pointers from tensors
+    CUdeviceptr a_ptr = get_tensor_device_ptr(A);
+    CUdeviceptr b_ptr = get_tensor_device_ptr(B);
+    CUdeviceptr c_ptr = get_tensor_device_ptr(C);
+
+    // Triton adds 2 extra metadata pointer parameters beyond the TTIR signature
+    CUdeviceptr null_ptr = 0;
+
+    // Build kernel args: 3 ptrs + 9 i32 scalars + 2 null metadata ptrs = 14 params
+    void* args[] = {
+      &a_ptr, &b_ptr, &c_ptr,
+      &M, &N, &K,
+      &stride_am, &stride_ak,
+      &stride_bk, &stride_bn,
+      &stride_cm, &stride_cn,
+      &null_ptr, &null_ptr
+    };
+
+    // Launch kernel
+    CUDA_CHECK(cuLaunchKernel(
+      kernel,
+      grid[0], grid[1], grid[2],
+      block[0], block[1], block[2],
+      shared_mem,
+      nullptr,
+      args,
+      nullptr
+    ));
+
+    // Synchronize
+    CUDA_CHECK(cuCtxSynchronize());
+
+    return C;
+
+  } catch (std::exception &e) {
+    Rcpp::stop(e.what());
+  }
+}
+
+
+//' Clear the GPU Kernel Cache
+//'
+//' Unloads all cached PTX modules and clears the kernel cache.
+//' Call this when you want to free GPU resources or reload modified kernels.
+//'
+//' @return List with n_cleared (number of cached kernels removed)
+//' @export
+// [[Rcpp::export]]
+Rcpp::List gpu_cache_clear() {
+  int n = kernel_cache.size();
+  for (auto& kv : kernel_cache) {
+    cuModuleUnload(kv.second.module);
+  }
+  kernel_cache.clear();
+  return Rcpp::List::create(Rcpp::Named("n_cleared") = n);
+}
+
+
+//' Get GPU Kernel Cache Statistics
+//'
+//' @return List with n_cached (number of kernels in cache) and
+//'   kernel_names (character vector of cached kernel names)
+//' @export
+// [[Rcpp::export]]
+Rcpp::List gpu_cache_stats() {
+  std::vector<std::string> names;
+  names.reserve(kernel_cache.size());
+  for (auto& kv : kernel_cache) {
+    names.push_back(kv.first);
+  }
+  return Rcpp::List::create(
+    Rcpp::Named("n_cached") = (int)kernel_cache.size(),
+    Rcpp::Named("kernel_names") = names
+  );
 }

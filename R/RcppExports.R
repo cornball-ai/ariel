@@ -16,6 +16,55 @@ gpu_launch <- function(ptx, kernel_name, inputs, output, grid, block, shared_mem
     .Call(`_ariel_gpu_launch`, ptx, kernel_name, inputs, output, grid, block, shared_mem)
 }
 
+#' Launch a Matmul GPU Kernel from Compiled PTX
+#'
+#' Matmul kernels have a different parameter layout than elementwise kernels:
+#' 3 pointer args (A, B, C), 9 i32 scalars (M, N, K, strides), and 2 null
+#' metadata pointers added by Triton. This function handles that layout.
+#'
+#' @param ptx Character, PTX assembly from mlir_compile()
+#' @param kernel_name Character, entry point function name
+#' @param A torch_tensor, matrix A (must be on CUDA)
+#' @param B torch_tensor, matrix B (must be on CUDA)
+#' @param C torch_tensor, pre-allocated output matrix (must be on CUDA)
+#' @param M Integer, rows of A / rows of C
+#' @param N Integer, cols of B / cols of C
+#' @param K Integer, cols of A / rows of B
+#' @param stride_am Integer, stride of A along M dimension
+#' @param stride_ak Integer, stride of A along K dimension
+#' @param stride_bk Integer, stride of B along K dimension
+#' @param stride_bn Integer, stride of B along N dimension
+#' @param stride_cm Integer, stride of C along M dimension
+#' @param stride_cn Integer, stride of C along N dimension
+#' @param grid Integer vector of length 3, grid dimensions
+#' @param block Integer vector of length 3, block dimensions
+#' @param shared_mem Integer, dynamic shared memory bytes
+#' @return The output tensor C
+#' @export
+gpu_launch_matmul <- function(ptx, kernel_name, A, B, C, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, grid, block, shared_mem = 0L) {
+    .Call(`_ariel_gpu_launch_matmul`, ptx, kernel_name, A, B, C, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, grid, block, shared_mem)
+}
+
+#' Clear the GPU Kernel Cache
+#'
+#' Unloads all cached PTX modules and clears the kernel cache.
+#' Call this when you want to free GPU resources or reload modified kernels.
+#'
+#' @return List with n_cleared (number of cached kernels removed)
+#' @export
+gpu_cache_clear <- function() {
+    .Call(`_ariel_gpu_cache_clear`)
+}
+
+#' Get GPU Kernel Cache Statistics
+#'
+#' @return List with n_cached (number of kernels in cache) and
+#'   kernel_names (character vector of cached kernel names)
+#' @export
+gpu_cache_stats <- function() {
+    .Call(`_ariel_gpu_cache_stats`)
+}
+
 compile_mlir_to_ptx <- function(mlir_text, compute_capability, num_warps, num_ctas, ptx_version) {
     .Call(`_ariel_compile_mlir_to_ptx`, mlir_text, compute_capability, num_warps, num_ctas, ptx_version)
 }
