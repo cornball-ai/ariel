@@ -2,6 +2,7 @@
 
 export(emit_ttir)
 export(emit_ttir_matmul)
+export(gpu_launch)
 export(mlir_compile)
 export(triton_op_supported)
 

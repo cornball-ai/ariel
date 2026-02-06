@@ -10,6 +10,23 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// gpu_launch
+SEXP gpu_launch(std::string ptx, std::string kernel_name, Rcpp::List inputs, SEXP output, Rcpp::IntegerVector grid, Rcpp::IntegerVector block, int shared_mem);
+RcppExport SEXP _ariel_gpu_launch(SEXP ptxSEXP, SEXP kernel_nameSEXP, SEXP inputsSEXP, SEXP outputSEXP, SEXP gridSEXP, SEXP blockSEXP, SEXP shared_memSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type ptx(ptxSEXP);
+    Rcpp::traits::input_parameter< std::string >::type kernel_name(kernel_nameSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type inputs(inputsSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type output(outputSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type grid(gridSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type block(blockSEXP);
+    Rcpp::traits::input_parameter< int >::type shared_mem(shared_memSEXP);
+    rcpp_result_gen = Rcpp::wrap(gpu_launch(ptx, kernel_name, inputs, output, grid, block, shared_mem));
+    return rcpp_result_gen;
+END_RCPP
+}
 // compile_mlir_to_ptx
 Rcpp::List compile_mlir_to_ptx(std::string mlir_text, int compute_capability, int num_warps, int num_ctas, int ptx_version);
 RcppExport SEXP _ariel_compile_mlir_to_ptx(SEXP mlir_textSEXP, SEXP compute_capabilitySEXP, SEXP num_warpsSEXP, SEXP num_ctasSEXP, SEXP ptx_versionSEXP) {
@@ -27,6 +44,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_ariel_gpu_launch", (DL_FUNC) &_ariel_gpu_launch, 7},
     {"_ariel_compile_mlir_to_ptx", (DL_FUNC) &_ariel_compile_mlir_to_ptx, 5},
     {NULL, NULL, 0}
 };

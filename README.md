@@ -43,6 +43,27 @@ result <- emit_ttir_matmul(ir, group_id = 1L)
 compiled <- mlir_compile(result, sm = 80L)
 ```
 
+### GPU execution
+
+```r
+# Create input on GPU
+x <- torch_randn(c(16, 16))$cuda()
+
+# Allocate output
+output <- torch_zeros_like(x)
+
+# Launch kernel
+result <- gpu_launch(
+  ptx = compiled$ptx,
+  kernel_name = compiled$kernel_name,
+  inputs = list(x),
+  output = output,
+  grid = as.integer(c(1, 1, 1)),
+  block = as.integer(c(128, 1, 1)),  # Must match .reqntid in PTX
+  shared_mem = as.integer(compiled$shared_mem)
+)
+```
+
 ## Architecture
 
 ```
@@ -58,8 +79,8 @@ Phase 5b: mlir_compile()        Rcpp, links Triton C++ libs
 PTX assembly
       |
       v
-Phase 5c: gpu_launch()          (not yet implemented)
-      |                          CUDA driver API
+Phase 5c: gpu_launch()          Rcpp + CUDA driver API
+      |                          Launches compiled kernels
       v
 GPU execution
 ```
@@ -145,6 +166,30 @@ tryCatch(
 # "Failed to parse MLIR text..." = Triton working
 # "Triton is not available..."   = stub only
 ```
+
+## Triton Kernel Signature
+
+Triton-compiled PTX kernels have extra parameters beyond what's declared in the TTIR:
+
+**TTIR signature** (3 parameters):
+```mlir
+tt.func @kernel(%input: !tt.ptr<f32>, %output: !tt.ptr<f32>, %n_elements: i32)
+```
+
+**PTX signature** (5 parameters):
+```ptx
+.visible .entry kernel(
+  .param .u64 .ptr .global param_0,  // input pointer
+  .param .u64 .ptr .global param_1,  // output pointer
+  .param .u32 param_2,                // n_elements
+  .param .u64 .ptr .global param_3,  // metadata (pass NULL)
+  .param .u64 .ptr .global param_4   // metadata (pass NULL)
+)
+```
+
+`gpu_launch()` handles this automatically by passing NULL for the extra metadata parameters.
+
+**Thread count**: Triton kernels specify required thread count via `.reqntid` directive in PTX. The `block` parameter must match this value (typically 128).
 
 ## Supported operations
 

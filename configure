@@ -199,10 +199,14 @@ if [ -f "${TRITON_HOME}/include/triton/Dialect/Triton/IR/Dialect.h" ] && \
     LLVM_LIBS="${LLVM_LIBS} -lpthread -ldl -lz -lzstd"
   fi
 
-  TRITON_CPPFLAGS="${TRITON_INCLUDES} -DHAS_TRITON"
+  # Find torch installation
+  TORCH_INCLUDE=$(Rscript -e "cat(system.file('include', package='torch'))")
+  TORCH_LIB=$(Rscript -e "cat(system.file('lib', package='torch'))")
+
+  TRITON_CPPFLAGS="${TRITON_INCLUDES} -I/usr/local/cuda/include -I${TORCH_INCLUDE} -I${TORCH_INCLUDE}/torch/csrc/api/include -DHAS_TRITON -D_GLIBCXX_USE_CXX11_ABI=1"
   TRITON_CXXFLAGS="-std=c++17 -fPIC"
-  TRITON_LIBS="${TRITON_LDFLAGS} ${TRITON_LINK_LIBS} ${MLIR_LIBS} ${LLVM_LIBS}"
-  TRITON_SOURCES="triton_compile.cpp"
+  TRITON_LIBS="${TRITON_LDFLAGS} ${TRITON_LINK_LIBS} ${MLIR_LIBS} ${LLVM_LIBS} -L${TORCH_LIB} -ltorch -ltorch_cpu -lc10 -lcuda -Wl,-rpath,${TORCH_LIB}"
+  TRITON_SOURCES="triton_compile.cpp cuda_launch.cpp"
 
 else
   echo ""
