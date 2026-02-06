@@ -20,8 +20,8 @@ Phase 5a: emit_ttir()          ← Pure R, string generation
 Triton MLIR (.mlir text)
       │
       ▼
-Phase 5b: mlir_compile()        ← C bindings via .Call()
-      │                            Links against Triton's MLIR libs
+Phase 5b: mlir_compile()        ← Rcpp bindings via .Call()
+      │                            Links against Triton's C++ MLIR libs
       │                            Runs: tt → ttg → LLVM → PTX
       ▼
 PTX / CUBIN
@@ -66,51 +66,69 @@ ir <- lower_to_ir(list(quote(x$relu()$sigmoid()$tanh())))
 ir <- optimize_graph(ir)
 
 # ariel compiles to GPU
-mlir_text <- emit_ttir(ir, group_id = 1L)  # Phase 5a
-# kernel <- mlir_compile(mlir_text)          # Phase 5b
-# result <- gpu_launch(kernel, x_gpu)        # Phase 5c
+result <- emit_ttir(ir, group_id = 1L)     # Phase 5a
+compiled <- mlir_compile(result, sm = 80L) # Phase 5b (needs Triton)
+compiled$ptx                               # PTX assembly
+# gpu_launch(compiled, x_gpu)              # Phase 5c (planned)
 ```
 
 ## Package Conventions
 
-- Base R only (tinyverse)
-- C (not C++) for MLIR/CUDA bindings where possible
+- Base R only (tinyverse), Rcpp for C++ bindings
 - tinytest for testing
 - Phase 5a tests work without GPU (pure string output)
-- Phase 5b/5c tests guarded by GPU availability
+- Phase 5b tests guarded by Triton availability
+- Phase 5c tests guarded by GPU availability
 
 ## Phased Development
 
-### Phase 5a — MLIR Textual IR Emission (current)
+### Phase 5a — MLIR Textual IR Emission (complete)
 - `R/ir_to_mlir.R`: torchlang IR → Triton MLIR text
 - Pure R, no system dependencies
 - Testable anywhere
 
-### Phase 5b — MLIR C API Compilation
-- `src/mlir_bindings.c`: R ↔ MLIR C API
-- Links against Triton's MLIR libraries
-- Needs: Triton installed from source (for libTritonIR, etc.)
+### Phase 5b — MLIR Compilation via Rcpp (complete)
+- `src/triton_compile.cpp`: Rcpp bindings wrapping Triton's C++ MLIR pipeline
+- `src/triton_stub.cpp`: Fallback when Triton not available
+- `R/compile.R`: R wrapper `mlir_compile()`
+- `configure`: Finds TRITON_HOME, LLVM_DIR, writes Makevars
+- Mirrors pass ordering from `triton/third_party/nvidia/backend/compiler.py`
+- Pipeline: parse MLIR → TTIR passes → TTGIR → LLVM dialect → LLVM IR → PTX
+- Needs: Triton built from source + LLVM/MLIR
 
-### Phase 5c — GPU Launch
+### Phase 5c — GPU Launch (planned)
 - `src/cuda_launch.c`: CUDA driver API bindings
 - `R/launch.R`: kernel execution, memory management
 - Needs: CUDA toolkit
 
-## Building Triton for C API Access
+## Building Triton for Phase 5b
 
-Triton must be built from source to get the MLIR libraries:
+Triton must be built from source to get C++ headers + libraries:
 
 ```bash
-git clone https://github.com/triton-lang/triton.git
-cd triton
-pip install -e python  # builds C++ libraries
-# Libraries end up in triton/_C/ or build/
+git clone https://github.com/triton-lang/triton.git ~/triton
+cd ~/triton
+pip install -e python  # builds C++ libs + downloads LLVM/MLIR
 ```
 
-Key libraries needed:
-- libTritonIR (Triton MLIR dialects)
-- libTritonTransforms (optimization passes)
-- libMLIR (core MLIR infrastructure)
+This produces:
+- **Headers**: `~/triton/include/triton/` (source) + build dir (tablegen'd)
+- **Libraries**: Object files in build dir
+- **LLVM/MLIR**: Auto-downloaded to `~/.triton/llvm/{hash}/`
+
+Then reinstall ariel:
+```bash
+TRITON_HOME=~/triton r -e 'tinypkgr::install()'
+```
+
+Without Triton, the package installs with a stub: Phase 5a works,
+`mlir_compile()` returns a clear error message.
+
+### Key libraries linked (when Triton available)
+- Triton: TritonIR, TritonGPUIR, TritonToTritonGPU, TritonGPUToLLVM,
+  TritonNVIDIAGPUToLLVM, NVGPUToLLVM, TritonAnalysis, etc.
+- MLIR: MLIRPass, MLIRParser, MLIRIR, dialect libs (arith, math, scf, gpu, etc.)
+- LLVM: NVPTXCodeGen, Passes, Core, Support, etc.
 
 ## Tested Emission Patterns (Phase 5a)
 
@@ -140,4 +158,6 @@ The benchmark script at `torchlang/inst/scripts/whisper_bench.R` demonstrates ar
 - Attention scores: matmul * scale
 - Residual add
 
-torchlang captures these as expressions, optimizes to IR, and ariel emits TTIR for each fusible group. Currently text-only (Phase 5a) — no GPU compilation yet.
+torchlang captures these as expressions, optimizes to IR, and ariel emits
+TTIR for each fusible group. With Triton built from source, `mlir_compile()`
+compiles to PTX. GPU launch (Phase 5c) is planned.

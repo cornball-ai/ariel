@@ -130,8 +130,8 @@ silu_groups <- torchlang:::get_fusion_groups(ir_silu)
 if (length(silu_groups) > 0L) {
   silu_result <- emit_ttir(ir_silu, silu_groups[1])
   if (!is.null(silu_result)) {
-    # silu decomposes to negf + exp + addf + divf
-    expect_true(grepl("arith.negf", silu_result$mlir_text))
+    # silu decomposes to subf(0,x) + exp + addf + divf
+    expect_true(grepl("arith.subf", silu_result$mlir_text))
     expect_true(grepl("math.exp", silu_result$mlir_text))
   }
 }

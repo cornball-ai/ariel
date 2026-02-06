@@ -2,4 +2,9 @@
 
 export(emit_ttir)
 export(emit_ttir_matmul)
+export(mlir_compile)
 export(triton_op_supported)
+
+importFrom(Rcpp,sourceCpp)
+
+useDynLib(ariel, .registration = TRUE)

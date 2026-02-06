@@ -1,0 +1,237 @@
+#!/bin/sh
+# configure — find Triton headers/libs and write src/Makevars
+#
+# Searches for:
+#   TRITON_HOME  — Triton source tree (headers in include/triton/)
+#   TRITON_BUILD — CMake build directory (tablegen'd .h.inc, object libs)
+#   LLVM_DIR     — LLVM/MLIR build directory (llvm-config, headers, libs)
+#
+# Supported build layouts:
+#   1. Direct CMake:     TRITON_HOME/build/ + TRITON_HOME/llvm-project/build/
+#   2. pip install -e:   TRITON_HOME/python/build/cmake.*/ + ~/.triton/llvm/
+#
+# When Triton is not found: builds with stub only (Phase 5a works, 5b errors gracefully).
+
+set -e
+
+# Defaults
+TRITON_HOME="${TRITON_HOME:-${HOME}/triton}"
+HAS_TRITON=no
+
+echo "=== ariel configure ==="
+echo "Looking for Triton installation..."
+
+# --- Find Triton source headers ---
+if [ -f "${TRITON_HOME}/include/triton/Dialect/Triton/IR/Dialect.h" ]; then
+  echo "Found Triton headers: ${TRITON_HOME}/include/"
+else
+  echo "Triton headers not found at ${TRITON_HOME}/include/"
+  echo "Set TRITON_HOME to your Triton source directory."
+  echo "Building with stub only (Phase 5a works, mlir_compile() will error)."
+fi
+
+# --- Find Triton build directory ---
+if [ -z "${TRITON_BUILD}" ]; then
+  # Layout 1: Direct CMake build at TRITON_HOME/build/
+  if [ -d "${TRITON_HOME}/build/include" ]; then
+    TRITON_BUILD="${TRITON_HOME}/build"
+  fi
+  # Layout 2: pip install -e (python/build/cmake.*/)
+  if [ -z "${TRITON_BUILD}" ]; then
+    for d in "${TRITON_HOME}/python/build"/cmake.*/; do
+      if [ -d "$d" ]; then
+        TRITON_BUILD="$d"
+        break
+      fi
+    done
+  fi
+fi
+
+if [ -n "${TRITON_BUILD}" ] && [ -d "${TRITON_BUILD}" ]; then
+  echo "Found Triton build: ${TRITON_BUILD}"
+else
+  echo "Triton build directory not found."
+fi
+
+# --- Find LLVM/MLIR ---
+if [ -z "${LLVM_DIR}" ]; then
+  # Layout 1: LLVM built in-tree at TRITON_HOME/llvm-project/build/
+  if [ -f "${TRITON_HOME}/llvm-project/build/bin/llvm-config" ]; then
+    LLVM_DIR="${TRITON_HOME}/llvm-project/build"
+  fi
+  # Triton downloads LLVM to ~/.triton/llvm/{hash}/
+  if [ -z "${LLVM_DIR}" ] && [ -d "${HOME}/.triton/llvm" ]; then
+    for d in "${HOME}/.triton/llvm"/*/; do
+      if [ -f "${d}bin/llvm-config" ]; then
+        LLVM_DIR="$d"
+        break
+      fi
+    done
+  fi
+  # Also check ~/.llvm-project/build
+  if [ -z "${LLVM_DIR}" ] && [ -d "${HOME}/.llvm-project/build" ]; then
+    LLVM_DIR="${HOME}/.llvm-project/build"
+  fi
+fi
+
+if [ -n "${LLVM_DIR}" ] && [ -d "${LLVM_DIR}" ]; then
+  echo "Found LLVM/MLIR: ${LLVM_DIR}"
+else
+  echo "LLVM/MLIR not found."
+fi
+
+# --- Find NVIDIA third-party directory ---
+NVIDIA_DIR="${TRITON_HOME}/third_party/nvidia"
+if [ -d "${NVIDIA_DIR}" ]; then
+  echo "Found NVIDIA backend: ${NVIDIA_DIR}"
+fi
+
+# --- Determine if we have everything for a full build ---
+if [ -f "${TRITON_HOME}/include/triton/Dialect/Triton/IR/Dialect.h" ] && \
+   [ -n "${TRITON_BUILD}" ] && [ -d "${TRITON_BUILD}" ] && \
+   [ -n "${LLVM_DIR}" ] && [ -d "${LLVM_DIR}" ]; then
+
+  HAS_TRITON=yes
+  echo "Full Triton build enabled."
+
+  # Construct include paths
+  # Triton source headers
+  TRITON_INCLUDES="-I${TRITON_HOME}/include"
+  TRITON_INCLUDES="${TRITON_INCLUDES} -I${TRITON_HOME}/third_party"
+  TRITON_INCLUDES="${TRITON_INCLUDES} -I${NVIDIA_DIR}/include"
+  TRITON_INCLUDES="${TRITON_INCLUDES} -I${NVIDIA_DIR}"
+
+  # Tablegen'd headers from Triton build dir
+  if [ -d "${TRITON_BUILD}/include" ]; then
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${TRITON_BUILD}/include"
+  fi
+  # Tablegen'd third_party headers (nvidia/include/... pattern)
+  if [ -d "${TRITON_BUILD}/third_party" ]; then
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${TRITON_BUILD}/third_party"
+  fi
+  # NVIDIA tablegen'd headers (direct include)
+  for d in "${TRITON_BUILD}/third_party/nvidia/include" \
+           "${TRITON_BUILD}/third_party/nvidia"; do
+    if [ -d "$d" ]; then
+      TRITON_INCLUDES="${TRITON_INCLUDES} -I${d}"
+    fi
+  done
+
+  # LLVM/MLIR includes
+  # For in-tree LLVM build, we need both source and generated headers
+  LLVM_SRC="${TRITON_HOME}/llvm-project"
+  if [ -d "${LLVM_SRC}/llvm/include" ]; then
+    # In-tree build: source + generated headers are separate
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${LLVM_SRC}/llvm/include"
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${LLVM_DIR}/include"
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${LLVM_SRC}/mlir/include"
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${LLVM_DIR}/tools/mlir/include"
+  elif [ -d "${LLVM_DIR}/include" ]; then
+    # Pre-installed LLVM: all headers in one place
+    TRITON_INCLUDES="${TRITON_INCLUDES} -I${LLVM_DIR}/include"
+  fi
+
+  # Triton static archive (from direct CMake build)
+  TRITON_STATIC="${TRITON_BUILD}/lib_static/libTritonAll.a"
+
+  # Library paths and link flags
+  TRITON_LDFLAGS=""
+  if [ -d "${LLVM_DIR}/lib" ]; then
+    TRITON_LDFLAGS="-L${LLVM_DIR}/lib"
+  fi
+
+  # Triton libraries: prefer single static archive, fallback to individual libs
+  TRITON_LINK_LIBS=""
+  if [ -f "${TRITON_STATIC}" ]; then
+    echo "Using static archive: ${TRITON_STATIC}"
+    TRITON_LINK_LIBS="${TRITON_STATIC}"
+  else
+    # Individual libraries (pip install layout)
+    if [ -d "${TRITON_BUILD}/lib" ]; then
+      TRITON_LDFLAGS="${TRITON_LDFLAGS} -L${TRITON_BUILD}/lib"
+    fi
+    for d in "${TRITON_BUILD}/third_party/nvidia/lib" \
+             "${TRITON_BUILD}/third_party/nvidia"; do
+      if [ -d "$d" ]; then
+        TRITON_LDFLAGS="${TRITON_LDFLAGS} -L${d}"
+      fi
+    done
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonNVIDIAGPUToLLVM"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lNVGPUToLLVM"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonGPUToLLVM"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonToTritonGPU"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonNVIDIAGPUTransforms"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lNVGPUIR"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonGPUIR"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonGPUTransforms"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonIR"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonTransforms"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonAnalysis"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonTools"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lGluonIR"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lGluonTransforms"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonInstrumentIR"
+    TRITON_LINK_LIBS="${TRITON_LINK_LIBS} -lTritonInstrumentTransforms"
+  fi
+
+  # MLIR libraries — use --start-group to resolve circular deps
+  # Collect all MLIR .a files from LLVM build
+  MLIR_ARCHIVES=""
+  for f in "${LLVM_DIR}"/lib/libMLIR*.a; do
+    [ -f "$f" ] && MLIR_ARCHIVES="${MLIR_ARCHIVES} ${f}"
+  done
+  MLIR_LIBS="-Wl,--start-group ${MLIR_ARCHIVES} -Wl,--end-group"
+
+  # LLVM libraries (via llvm-config)
+  LLVM_LIBS=""
+  if [ -x "${LLVM_DIR}/bin/llvm-config" ]; then
+    LLVM_LIBS=$("${LLVM_DIR}/bin/llvm-config" --libs all)
+    LLVM_LIBS="${LLVM_LIBS} $("${LLVM_DIR}/bin/llvm-config" --system-libs)"
+  else
+    LLVM_LIBS="-lLLVMPasses -lLLVMNVPTXCodeGen -lLLVMNVPTXDesc"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMNVPTXInfo -lLLVMCodeGen -lLLVMSelectionDAG"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMAsmPrinter -lLLVMipo -lLLVMVectorize"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMInstCombine -lLLVMScalarOpts"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMTransformUtils -lLLVMAnalysis"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMTarget -lLLVMMC -lLLVMMCParser"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMAsmParser -lLLVMCore -lLLVMSupport"
+    LLVM_LIBS="${LLVM_LIBS} -lLLVMBinaryFormat -lLLVMDemangle"
+    LLVM_LIBS="${LLVM_LIBS} -lpthread -ldl -lz -lzstd"
+  fi
+
+  TRITON_CPPFLAGS="${TRITON_INCLUDES} -DHAS_TRITON"
+  TRITON_CXXFLAGS="-std=c++17 -fPIC"
+  TRITON_LIBS="${TRITON_LDFLAGS} ${TRITON_LINK_LIBS} ${MLIR_LIBS} ${LLVM_LIBS}"
+  TRITON_SOURCES="triton_compile.cpp"
+
+else
+  echo ""
+  echo "Building stub only (no Triton)."
+  echo "Phase 5a (emit_ttir) works. Phase 5b (mlir_compile) will error."
+  echo ""
+
+  TRITON_CPPFLAGS=""
+  TRITON_CXXFLAGS="-std=c++17"
+  TRITON_LIBS=""
+  TRITON_SOURCES="triton_stub.cpp"
+fi
+
+# --- Write Makevars from template ---
+sed \
+  -e "s|@TRITON_CPPFLAGS@|${TRITON_CPPFLAGS}|g" \
+  -e "s|@TRITON_CXXFLAGS@|${TRITON_CXXFLAGS}|g" \
+  -e "s|@TRITON_LIBS@|${TRITON_LIBS}|g" \
+  -e "s|@TRITON_SOURCES@|${TRITON_SOURCES}|g" \
+  src/Makevars.in > src/Makevars
+
+echo ""
+echo "=== Configuration summary ==="
+echo "HAS_TRITON: ${HAS_TRITON}"
+echo "Sources: ${TRITON_SOURCES}"
+if [ "${HAS_TRITON}" = "yes" ]; then
+  echo "TRITON_HOME: ${TRITON_HOME}"
+  echo "TRITON_BUILD: ${TRITON_BUILD}"
+  echo "LLVM_DIR: ${LLVM_DIR}"
+fi
+echo "Wrote src/Makevars"
+echo "=== Done ==="

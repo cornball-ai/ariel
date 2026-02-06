@@ -10,7 +10,7 @@
 
 # Unary ops: torchlang op name -> MLIR op string
 .ttir_unary_ops <- list(
-  neg   = "arith.negf",
+  # neg is handled as compound op (arith.subf from zero)
   exp   = "math.exp",
   log   = "math.log",
   log2  = "math.log2",
@@ -32,7 +32,7 @@
 )
 
 # Compound ops that need custom MLIR emission (not 1:1 with MLIR ops)
-.ttir_compound_ops <- c("relu", "sigmoid", "silu", "gelu", "sign")
+.ttir_compound_ops <- c("neg", "relu", "sigmoid", "silu", "gelu", "sign")
 
 
 #' Check if an Op is Supported for Triton Emission
@@ -70,7 +70,14 @@ triton_op_supported <- function(op) {
   lines <- character()
   final_ssa <- .ssa(base_id)
 
-  if (op == "relu") {
+  if (op == "neg") {
+    # neg(x) = 0 - x (Triton does not support arith.negf)
+    zero_ssa <- sprintf("%%zero_%d", base_id)
+    lines <- c(
+      sprintf("    %s = arith.constant dense<0.000000e+00> : %s", zero_ssa, type),
+      sprintf("    %s = arith.subf %s, %s : %s", final_ssa, zero_ssa, x, type)
+    )
+  } else if (op == "relu") {
     # relu(x) = select(x > 0, x, 0)
     zero_ssa <- sprintf("%%zero_%d", base_id)
     cmp_ssa <- sprintf("%%cmp_%d", base_id)
@@ -83,12 +90,14 @@ triton_op_supported <- function(op) {
     )
   } else if (op == "sigmoid") {
     # sigmoid(x) = 1 / (1 + exp(-x))
+    zero_ssa <- sprintf("%%zero_%d", base_id)
     neg_ssa <- sprintf("%%neg_%d", base_id)
     exp_ssa <- sprintf("%%exp_%d", base_id)
     one_ssa <- sprintf("%%one_%d", base_id)
     sum_ssa <- sprintf("%%sum_%d", base_id)
     lines <- c(
-      sprintf("    %s = arith.negf %s : %s", neg_ssa, x, type),
+      sprintf("    %s = arith.constant dense<0.000000e+00> : %s", zero_ssa, type),
+      sprintf("    %s = arith.subf %s, %s : %s", neg_ssa, zero_ssa, x, type),
       sprintf("    %s = math.exp %s : %s", exp_ssa, neg_ssa, type),
       sprintf("    %s = arith.constant dense<1.000000e+00> : %s", one_ssa, type),
       sprintf("    %s = arith.addf %s, %s : %s", sum_ssa, one_ssa, exp_ssa, type),
@@ -96,12 +105,14 @@ triton_op_supported <- function(op) {
     )
   } else if (op == "silu") {
     # silu(x) = x / (1 + exp(-x))
+    zero_ssa <- sprintf("%%zero_%d", base_id)
     neg_ssa <- sprintf("%%neg_%d", base_id)
     exp_ssa <- sprintf("%%exp_%d", base_id)
     one_ssa <- sprintf("%%one_%d", base_id)
     sum_ssa <- sprintf("%%sum_%d", base_id)
     lines <- c(
-      sprintf("    %s = arith.negf %s : %s", neg_ssa, x, type),
+      sprintf("    %s = arith.constant dense<0.000000e+00> : %s", zero_ssa, type),
+      sprintf("    %s = arith.subf %s, %s : %s", neg_ssa, zero_ssa, x, type),
       sprintf("    %s = math.exp %s : %s", exp_ssa, neg_ssa, type),
       sprintf("    %s = arith.constant dense<1.000000e+00> : %s", one_ssa, type),
       sprintf("    %s = arith.addf %s, %s : %s", sum_ssa, one_ssa, exp_ssa, type),

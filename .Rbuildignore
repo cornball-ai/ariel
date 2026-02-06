@@ -1,3 +1,5 @@
 ^CLAUDE\.md$
 ^\.github$
 ^\.git$
+^src/Makevars$
+^configure\.log$
