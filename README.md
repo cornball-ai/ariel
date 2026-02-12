@@ -2,7 +2,7 @@
 
 R front-end for the [Triton](https://github.com/triton-lang/triton) GPU compiler. Takes [torchlang](https://github.com/cornball-ai/torchlang) IR graphs and compiles them to GPU kernels via Triton's MLIR infrastructure, bypassing Python entirely.
 
-Named after *The Little Mermaid* — just like King Triton, but [part of R world](https://www.youtube.com/watch?v=SXKlJuO07eM).
+Named after *The Little Mermaid* — just like King Triton, but [part of youR world](https://www.youtube.com/watch?v=SXKlJuO07eM).
 
 ## Installation
 

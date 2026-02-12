@@ -57,8 +57,8 @@ expect_true(grepl("arith.select", result$mlir_text))
 expect_true(grepl("math.exp", result$mlir_text))
 expect_true(grepl("arith.divf", result$mlir_text))
 
-# Contains tanh
-expect_true(grepl("math.tanh", result$mlir_text))
+# Contains tanh (decomposed to 2*sigmoid(2x)-1, no math.tanh)
+expect_true(grepl("arith.mulf", result$mlir_text))
 
 # Metadata
 expect_equal(result$n_inputs, 1L)
@@ -147,9 +147,9 @@ gelu_groups <- torchlang:::get_fusion_groups(ir_gelu)
 if (length(gelu_groups) > 0L) {
   gelu_result <- emit_ttir(ir_gelu, gelu_groups[1])
   if (!is.null(gelu_result)) {
-    # gelu decomposes to mulf + tanh + addf
+    # gelu decomposes to mulf + sigmoid approx (no math.tanh)
     expect_true(grepl("arith.mulf", gelu_result$mlir_text))
-    expect_true(grepl("math.tanh", gelu_result$mlir_text))
+    expect_true(grepl("math.exp", gelu_result$mlir_text))
   }
 }
 

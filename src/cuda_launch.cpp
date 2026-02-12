@@ -254,6 +254,87 @@ SEXP gpu_launch_matmul(std::string ptx, std::string kernel_name,
 }
 
 
+//' Launch a Matmul+Bias GPU Kernel from Compiled PTX
+//'
+//' Like gpu_launch_matmul but with an extra bias pointer parameter.
+//' The kernel layout is: 4 pointer args (A, B, bias, C), 9 i32 scalars
+//' (M, N, K, strides), and 2 null metadata pointers added by Triton.
+//'
+//' @param ptx Character, PTX assembly from mlir_compile()
+//' @param kernel_name Character, entry point function name
+//' @param A torch_tensor, matrix A (must be on CUDA)
+//' @param B torch_tensor, matrix B (must be on CUDA)
+//' @param bias torch_tensor, 1D bias vector (must be on CUDA)
+//' @param C torch_tensor, pre-allocated output matrix (must be on CUDA)
+//' @param M Integer, rows of A / rows of C
+//' @param N Integer, cols of B / cols of C
+//' @param K Integer, cols of A / rows of B
+//' @param stride_am Integer, stride of A along M dimension
+//' @param stride_ak Integer, stride of A along K dimension
+//' @param stride_bk Integer, stride of B along K dimension
+//' @param stride_bn Integer, stride of B along N dimension
+//' @param stride_cm Integer, stride of C along M dimension
+//' @param stride_cn Integer, stride of C along N dimension
+//' @param grid Integer vector of length 3, grid dimensions
+//' @param block Integer vector of length 3, block dimensions
+//' @param shared_mem Integer, dynamic shared memory bytes
+//' @return The output tensor C
+//' @export
+// [[Rcpp::export]]
+SEXP gpu_launch_matmul_bias(std::string ptx, std::string kernel_name,
+                             SEXP A, SEXP B, SEXP bias, SEXP C,
+                             int M, int N, int K,
+                             int stride_am, int stride_ak,
+                             int stride_bk, int stride_bn,
+                             int stride_cm, int stride_cn,
+                             Rcpp::IntegerVector grid, Rcpp::IntegerVector block,
+                             int shared_mem = 0) {
+  try {
+    ensure_cuda_initialized();
+
+    CUfunction kernel = get_cached_kernel(ptx, kernel_name);
+
+    // Extract device pointers from tensors
+    CUdeviceptr a_ptr = get_tensor_device_ptr(A);
+    CUdeviceptr b_ptr = get_tensor_device_ptr(B);
+    CUdeviceptr bias_ptr = get_tensor_device_ptr(bias);
+    CUdeviceptr c_ptr = get_tensor_device_ptr(C);
+
+    // Triton adds 2 extra metadata pointer parameters beyond the TTIR signature
+    CUdeviceptr null_ptr = 0;
+
+    // Build kernel args: 4 ptrs + 9 i32 scalars + 2 null metadata ptrs = 15 params
+    void* args[] = {
+      &a_ptr, &b_ptr, &bias_ptr, &c_ptr,
+      &M, &N, &K,
+      &stride_am, &stride_ak,
+      &stride_bk, &stride_bn,
+      &stride_cm, &stride_cn,
+      &null_ptr, &null_ptr
+    };
+
+    // Launch kernel
+    CUDA_CHECK(cuLaunchKernel(
+      kernel,
+      grid[0], grid[1], grid[2],
+      block[0], block[1], block[2],
+      shared_mem,
+      nullptr,
+      args,
+      nullptr
+    ));
+
+    // Synchronize
+    CUDA_CHECK(cuCtxSynchronize());
+
+    return C;
+
+  } catch (std::exception &e) {
+    Rcpp::stop(e.what());
+  }
+}
+
+
 //' Clear the GPU Kernel Cache
 //'
 //' Unloads all cached PTX modules and clears the kernel cache.

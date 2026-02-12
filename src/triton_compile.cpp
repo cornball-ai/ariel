@@ -66,12 +66,15 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IRReader/IRReader.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
 namespace {
@@ -94,6 +97,31 @@ std::string collectDiagnostics(mlir::MLIRContext &ctx,
   if (mlir::failed(result) && errorStr.empty())
     errorStr = "MLIR pass pipeline failed (no diagnostic)";
   return errorStr;
+}
+
+// Find libdevice.10.bc path (cached)
+std::string findLibdevicePath() {
+  static std::string path;
+  static bool searched = false;
+  if (searched) return path;
+  searched = true;
+
+  // Check CUDA_HOME first
+  const char* cuda_home = getenv("CUDA_HOME");
+  if (cuda_home) {
+    std::string p = std::string(cuda_home) + "/nvvm/libdevice/libdevice.10.bc";
+    if (llvm::sys::fs::exists(p)) { path = p; return path; }
+  }
+
+  const char* candidates[] = {
+    "/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+    "/usr/lib/cuda/nvvm/libdevice/libdevice.10.bc",
+    nullptr
+  };
+  for (int i = 0; candidates[i]; i++) {
+    if (llvm::sys::fs::exists(candidates[i])) { path = candidates[i]; return path; }
+  }
+  return path;
 }
 
 // Initialize LLVM targets (once)
@@ -295,6 +323,22 @@ Rcpp::List compile_mlir_to_ptx(std::string mlir_text,
       mlir::translateModuleToLLVMIR(module, llvmCtx);
   if (!llvmMod)
     Rcpp::stop("Failed to translate MLIR to LLVM IR");
+
+  // ---- 7b. Link libdevice for math functions (sqrt, log, rsqrt, etc.) ----
+  {
+    std::string libdevicePath = findLibdevicePath();
+    if (!libdevicePath.empty()) {
+      llvm::SMDiagnostic err;
+      auto libdeviceMod = llvm::parseIRFile(libdevicePath, err, llvmCtx);
+      if (libdeviceMod) {
+        // Only link functions that are actually referenced
+        if (llvm::Linker::linkModules(*llvmMod, std::move(libdeviceMod),
+                                       llvm::Linker::Flags::LinkOnlyNeeded)) {
+          Rcpp::warning("Failed to link libdevice (non-fatal)");
+        }
+      }
+    }
+  }
 
   // Set nvptx-short-ptr option
   {

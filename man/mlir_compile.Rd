@@ -36,6 +36,8 @@ List with:
 Takes the output of \code{emit_ttir()} or \code{emit_ttir_matmul()} and
 compiles it through Triton's full MLIR pipeline to produce PTX assembly.
 Requires Triton built from source (see Details).
+Results are cached on disk so repeated compilations of the same kernel
+(same MLIR text, same target parameters) are instant.
 }
 \details{
 Triton must be built from source to use this function:

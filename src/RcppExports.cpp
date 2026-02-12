@@ -54,6 +54,34 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// gpu_launch_matmul_bias
+SEXP gpu_launch_matmul_bias(std::string ptx, std::string kernel_name, SEXP A, SEXP B, SEXP bias, SEXP C, int M, int N, int K, int stride_am, int stride_ak, int stride_bk, int stride_bn, int stride_cm, int stride_cn, Rcpp::IntegerVector grid, Rcpp::IntegerVector block, int shared_mem);
+RcppExport SEXP _ariel_gpu_launch_matmul_bias(SEXP ptxSEXP, SEXP kernel_nameSEXP, SEXP ASEXP, SEXP BSEXP, SEXP biasSEXP, SEXP CSEXP, SEXP MSEXP, SEXP NSEXP, SEXP KSEXP, SEXP stride_amSEXP, SEXP stride_akSEXP, SEXP stride_bkSEXP, SEXP stride_bnSEXP, SEXP stride_cmSEXP, SEXP stride_cnSEXP, SEXP gridSEXP, SEXP blockSEXP, SEXP shared_memSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type ptx(ptxSEXP);
+    Rcpp::traits::input_parameter< std::string >::type kernel_name(kernel_nameSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type A(ASEXP);
+    Rcpp::traits::input_parameter< SEXP >::type B(BSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type bias(biasSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type C(CSEXP);
+    Rcpp::traits::input_parameter< int >::type M(MSEXP);
+    Rcpp::traits::input_parameter< int >::type N(NSEXP);
+    Rcpp::traits::input_parameter< int >::type K(KSEXP);
+    Rcpp::traits::input_parameter< int >::type stride_am(stride_amSEXP);
+    Rcpp::traits::input_parameter< int >::type stride_ak(stride_akSEXP);
+    Rcpp::traits::input_parameter< int >::type stride_bk(stride_bkSEXP);
+    Rcpp::traits::input_parameter< int >::type stride_bn(stride_bnSEXP);
+    Rcpp::traits::input_parameter< int >::type stride_cm(stride_cmSEXP);
+    Rcpp::traits::input_parameter< int >::type stride_cn(stride_cnSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type grid(gridSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type block(blockSEXP);
+    Rcpp::traits::input_parameter< int >::type shared_mem(shared_memSEXP);
+    rcpp_result_gen = Rcpp::wrap(gpu_launch_matmul_bias(ptx, kernel_name, A, B, bias, C, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, grid, block, shared_mem));
+    return rcpp_result_gen;
+END_RCPP
+}
 // gpu_cache_clear
 Rcpp::List gpu_cache_clear();
 RcppExport SEXP _ariel_gpu_cache_clear() {
@@ -93,6 +121,7 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_ariel_gpu_launch", (DL_FUNC) &_ariel_gpu_launch, 7},
     {"_ariel_gpu_launch_matmul", (DL_FUNC) &_ariel_gpu_launch_matmul, 17},
+    {"_ariel_gpu_launch_matmul_bias", (DL_FUNC) &_ariel_gpu_launch_matmul_bias, 18},
     {"_ariel_gpu_cache_clear", (DL_FUNC) &_ariel_gpu_cache_clear, 0},
     {"_ariel_gpu_cache_stats", (DL_FUNC) &_ariel_gpu_cache_stats, 0},
     {"_ariel_compile_mlir_to_ptx", (DL_FUNC) &_ariel_compile_mlir_to_ptx, 5},

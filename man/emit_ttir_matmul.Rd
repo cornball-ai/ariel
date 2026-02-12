@@ -7,6 +7,7 @@ emit_ttir_matmul(
   epilogue_ops = character(),
   func_name = "matmul_kernel",
   dtype = "f32",
+  has_bias = FALSE,
   block_m = 64L,
   block_n = 64L,
   block_k = 64L

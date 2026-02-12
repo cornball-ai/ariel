@@ -1,12 +1,18 @@
 # tinyrox says don't edit this manually, but it can't stop you!
 
+export(clear_ptx_cache)
 export(emit_ttir)
+export(emit_ttir_layer_norm)
 export(emit_ttir_matmul)
+export(emit_ttir_softmax)
 export(gpu_cache_clear)
+export(gpu_cache_load_ptx)
 export(gpu_cache_stats)
 export(gpu_launch)
 export(gpu_launch_matmul)
+export(gpu_launch_matmul_bias)
 export(mlir_compile)
+export(ptx_cache_stats)
 export(triton_op_supported)
 
 importFrom(Rcpp,sourceCpp)
