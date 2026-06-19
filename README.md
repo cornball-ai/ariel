@@ -98,7 +98,7 @@ sudo apt install cmake ninja-build clang lld
 ### Step 1: Clone Triton
 
 ```bash
-git clone https://github.com/triton-lang/triton.git ~/triton
+git clone https://github.com/triton-lang/triton ~/triton
 ```
 
 ### Step 2: Build LLVM/MLIR

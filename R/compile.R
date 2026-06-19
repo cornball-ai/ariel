@@ -23,7 +23,7 @@
 #' @details
 #' Triton must be built from source to use this function:
 #' \preformatted{
-#' git clone https://github.com/triton-lang/triton.git ~/triton
+#' git clone https://github.com/triton-lang/triton ~/triton
 #' cd ~/triton && pip install -e python
 #' }
 #' Then reinstall ariel with \code{TRITON_HOME=~/triton} set.

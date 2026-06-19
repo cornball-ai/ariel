@@ -106,7 +106,7 @@ compiled$ptx                               # PTX assembly
 Triton must be built from source to get C++ headers + libraries:
 
 ```bash
-git clone https://github.com/triton-lang/triton.git ~/triton
+git clone https://github.com/triton-lang/triton ~/triton
 cd ~/triton
 pip install -e python  # builds C++ libs + downloads LLVM/MLIR
 ```
